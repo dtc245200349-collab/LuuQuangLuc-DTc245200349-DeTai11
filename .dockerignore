@@ -2,6 +2,7 @@
 **/obj
 .git
 .env
+.env.*
 .local
 tmp
 *.pdf

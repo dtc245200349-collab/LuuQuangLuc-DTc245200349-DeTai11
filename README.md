@@ -27,14 +27,40 @@ Các cổng chỉ bind `127.0.0.1`. Mật khẩu mặc định là dữ liệu d
 
 ## Demo trong vài phút
 
-1. Mở giao diện, nhập tên, tiêu đề, nội dung; bấm **Điền ví dụ** hoặc nhập `samples/recipients.txt`.
+1. Mở giao diện, bấm **Tạo chiến dịch**. Nhập tên, tiêu đề, nội dung rồi bấm **Điền ví dụ** hoặc nhập `samples/recipients.txt`.
 2. Bấm **Tạo bản nháp**, kiểm tra danh sách rồi **Bắt đầu gửi**.
 3. Quan sát Pending/Sent/Failed và bấm **Xem** để thấy lịch sử xử lý, WorkerId, số lần thử.
 4. Mở Mailpit để đọc email đã gửi.
 5. Với cấu hình mặc định, địa chỉ `retry+…` giả lập lỗi hai lần rồi thành công ở lần thứ ba; địa chỉ `fail+…` giả lập lỗi vĩnh viễn. Các địa chỉ khác đi qua SMTP bình thường.
-6. Bấm **Gửi lại job thất bại**: chỉ các bản ghi Failed được đưa vào lượt mới. `fail+…` vẫn thất bại nếu cờ demo còn bật. Muốn gửi thành công nhóm này, đặt `ENABLE_DEMO_FAILURES=false` trong `.env`, chạy lại lệnh Compose rồi thử lại.
+6. Bấm **Gửi lại thư lỗi** để đưa các bản ghi Failed vào lượt mới. `fail+…` vẫn thất bại nếu cờ demo còn bật. Muốn gửi thành công nhóm này, đặt `ENABLE_DEMO_FAILURES=false` trong `.env`, chạy lại lệnh Compose rồi thử lại.
 
-Demo lỗi là chức năng kiểm thử có chủ đích. Tắt bằng `ENABLE_DEMO_FAILURES=false` để mọi địa chỉ dùng SMTP thực sự.
+Demo lỗi là chức năng kiểm thử có chủ đích. Tắt bằng `ENABLE_DEMO_FAILURES=false` để bỏ mô phỏng lỗi. Compose mặc định vẫn gửi qua Mailpit.
+
+## Gửi email thật bằng SMTP
+
+Chế độ này dùng cấu hình bổ sung `compose.smtp.yml`. Gmail cá nhân dùng `smtp.gmail.com:587` với STARTTLS. Bật [Xác minh 2 bước](https://support.google.com/mail/answer/185839), rồi tạo [Mật khẩu ứng dụng](https://myaccount.google.com/apppasswords) nếu tài khoản hỗ trợ. Tài khoản trường hoặc cơ quan có thể chặn tính năng này. Tham khảo [cài đặt SMTP Gmail](https://support.google.com/mail/answer/7104828) và [điều kiện dùng mật khẩu ứng dụng](https://support.google.com/accounts/answer/185833).
+
+Tạo `.env` ở thư mục dự án nếu chưa có. Thêm các dòng dưới đây vào tệp đó và thay giá trị mẫu bằng thông tin của bạn. Với Gmail, dán mật khẩu ứng dụng 16 ký tự, bỏ khoảng trắng. Giữ mật khẩu trong `.env` cục bộ. `.env` nằm trong `.gitignore`.
+
+```dotenv
+SMTP_RELAY_HOST=smtp.gmail.com
+SMTP_RELAY_PORT=587
+SMTP_RELAY_USERNAME=ten-cua-ban@gmail.com
+SMTP_RELAY_PASSWORD=MAT_KHAU_UNG_DUNG
+SMTP_RELAY_FROM=ten-cua-ban@gmail.com
+```
+
+Nếu dùng nhà cung cấp khác, nhập host, cổng STARTTLS, thông tin xác thực và địa chỉ người gửi được phép. Chế độ này dùng STARTTLS (thường là cổng 587).
+
+Chờ các chiến dịch đã khởi chạy xử lý xong trước khi đổi chế độ vì Worker vẫn đọc những job đang chờ. Sau đó chạy trong terminal VS Code:
+
+```powershell
+docker compose -f docker-compose.yml -f compose.smtp.yml up -d --build --scale notification-worker=2
+```
+
+Mở lại giao diện và tạo chiến dịch mới với **một địa chỉ thật của bạn**. Bấm **Bắt đầu gửi**, kiểm tra hộp thư đến và thư rác. Sau khi thử thành công, nhập danh sách người nhận thực đã đồng ý nhận thông báo. Tính cả các thư đã gửi trong hạn mức của tài khoản và xem [giới hạn Gmail](https://support.google.com/mail/answer/22839) nếu dùng Gmail. Danh sách mẫu `example.test` chỉ dành cho Mailpit.
+
+Để trở về Mailpit sau khi các job đã hoàn tất, chạy lại lệnh ở mục **Chạy nhanh**. Compose sẽ cập nhật các container dùng cấu hình thay đổi.
 
 ```sh
 docker compose ps
@@ -193,7 +219,7 @@ git push -u origin main
 
 Thay URL bằng repository thật. Nếu thư mục đã là Git repository thì bỏ `git init`; nếu đã có origin thì kiểm tra `git remote -v` trước khi đổi. Nếu Git yêu cầu danh tính, cấu hình tên/email thật của bạn. Không có thao tác push tự động hay thông tin tài khoản GitHub được nhúng trong mã nguồn.
 
-`.gitignore` loại `.env`, thư viện tạm, bin/obj, log và thư mục tmp. Hai PDF gốc hiện có trong thư mục; chỉ đưa lên repository công khai nếu bạn được phép chia sẻ tài liệu môn học. Tiếp tục commit các thay đổi thực tế của bạn; không tạo lịch sử giả để đáp ứng yêu cầu bài tập.
+`.gitignore` loại `.env`, thư viện tạm, bin/obj, log, thư mục tmp và hai PDF đề bài lưu trên máy. Tiếp tục commit các thay đổi thực tế của bạn.
 
 ## Xử lý lỗi thường gặp
 

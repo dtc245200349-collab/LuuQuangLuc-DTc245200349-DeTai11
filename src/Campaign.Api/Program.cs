@@ -37,6 +37,7 @@ app.MapGet("/api/info", (IConfiguration config) => Results.Ok(new
 {
     maxRecipients = CampaignRules.MaxRecipients,
     demoFailures = config.GetValue("Delivery:EnableDemoFailures", false),
+    externalSmtp = config.GetValue("Delivery:ExternalSmtp", false),
     maxAttempts = Math.Clamp(config.GetValue("Delivery:MaxAttempts", 3), 1, 10)
 }));
 
