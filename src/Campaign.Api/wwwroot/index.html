@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NotifyLab · Chiến dịch thông báo</title>
+  <link rel="stylesheet" href="/styles.css"><script src="/app.js" defer></script>
+</head>
+<body>
+  <header><div class="brand">N<span>NotifyLab</span></div><span class="pill">Đề tài 11 · Ứng dụng phân tán</span></header>
+  <main>
+    <section class="intro"><p class="eyebrow">TRUNG TÂM THÔNG BÁO</p><h1>Một chiến dịch.<br>Nhiều người nhận.</h1><p>Tạo nội dung, giao việc cho hàng đợi và theo dõi từng lượt gửi.</p><div class="flow">Client <span>→</span> API <span>→</span> RabbitMQ <span>→</span> Workers</div></section>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <div class="workspace">
+      <section class="panel create"><div class="section-title"><h2>Tạo chiến dịch</h2><span class="step">01</span></div>
+        <form id="create-form">
+          <label for="name">Tên chiến dịch</label><input id="name" required maxlength="120" placeholder="Thông báo lịch học tuần mới">
+          <label for="subject">Tiêu đề email</label><input id="subject" required maxlength="200" placeholder="Thông tin gửi đến người nhận">
+          <label for="body">Nội dung</label><textarea id="body" required maxlength="20000" rows="5" placeholder="Nhập nội dung thông báo…"></textarea>
+          <div class="label-row"><label for="recipients">Người nhận</label><button id="sample" type="button" class="text-button">Điền ví dụ</button></div>
+          <textarea id="recipients" required rows="5" placeholder="an@example.test&#10;binh@example.test"></textarea>
+          <p class="hint">Mỗi dòng một email, hoặc phân cách bằng dấu phẩy/chấm phẩy. Tối đa 5.000 địa chỉ; tự loại trùng không phân biệt hoa/thường.</p>
+          <label for="import-file" class="file-label">Nhập danh sách từ tệp .txt</label><input id="import-file" type="file" accept=".txt,text/plain">
+          <p id="demo-note" class="hint">Thư thử nghiệm được lưu trong Mailpit.</p>
+          <button id="create-button" type="submit" class="primary full">Tạo bản nháp <span>＋</span></button>
+        </form>
+      </section>
+      <section class="panel campaigns"><div class="section-title"><h2>Chiến dịch của bạn</h2><button id="refresh" class="secondary">Làm mới</button></div>
+        <p class="hint">Tự cập nhật mỗi 3 giây · Request–response qua REST API</p>
+        <div id="campaign-list" class="campaign-list"><p class="empty">Đang tải…</p></div>
+        <div class="pager"><button id="campaign-prev" class="secondary">← Trước</button><span id="campaign-page">Trang 1</span><button id="campaign-next" class="secondary">Sau →</button></div>
+      </section>
+    </div>
+    <section id="details" class="panel details" hidden>
+      <div class="section-title"><div><p class="eyebrow">THEO DÕI CHIẾN DỊCH</p><h2 id="detail-name"></h2></div><div class="actions"><button id="start" class="primary">Bắt đầu gửi</button><button id="retry" class="secondary">Gửi lại job thất bại</button></div></div>
+      <p id="detail-id" class="hint"></p>
+      <div class="stats"><div><span>Tổng người nhận</span><strong id="total">0</strong></div><div><span>Đang chờ / xử lý</span><strong id="pending">0</strong></div><div><span>Đã gửi</span><strong id="sent">0</strong></div><div><span>Thất bại</span><strong id="failed">0</strong></div></div>
+      <progress id="progress" max="100" value="0" aria-label="Tiến độ xử lý"></progress>
+      <div class="table-head"><h3>Kết quả từng người nhận</h3><select id="filter" aria-label="Lọc trạng thái"><option value="">Tất cả</option><option value="Pending">Đang chờ / xử lý</option><option value="Sent">Đã gửi</option><option value="Failed">Thất bại</option></select></div>
+      <div class="table-wrap"><table><thead><tr><th>Người nhận</th><th>Trạng thái</th><th>Số lần thử</th><th>Kết quả / lỗi gần nhất</th><th>Lịch sử</th></tr></thead><tbody id="delivery-list"></tbody></table></div>
+      <div class="pager"><button id="prev" class="secondary">← Trước</button><span id="page-label">Trang 1</span><button id="next" class="secondary">Sau →</button></div>
+      <p class="hint">“Đã gửi” nghĩa là SMTP đã chấp nhận thư, chưa xác nhận thư đã được đọc. Lịch sử hiển thị tối đa 100 lần thử gần nhất.</p>
+    </section>
+    <dialog id="history"><div class="section-title"><h2>Lịch sử xử lý</h2><button id="close-history" class="secondary">Đóng</button></div><div id="history-content"></div></dialog>
+    <footer>NotifyLab · .NET 10 / PostgreSQL / RabbitMQ <span>Bản học tập chạy cục bộ, chưa có đăng nhập</span></footer>
+  </main>
+</body>
+</html>
