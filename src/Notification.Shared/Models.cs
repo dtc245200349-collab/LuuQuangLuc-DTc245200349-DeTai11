@@ -12,6 +12,13 @@ public sealed record AttemptView(int Generation, string WorkerId, DateTime Start
 public sealed record SendNotification(Guid MessageId, Guid CampaignId, Guid DeliveryId, int Generation, int SchemaVersion = 1);
 public sealed record ClaimedDelivery(Guid Id, Guid CampaignId, int Generation, Guid Owner, string Address,
     string Subject, string Body, int AttemptCount);
+public sealed record DeliveryAuditEvent(Guid EventId, Guid CampaignId, Guid DeliveryId, int Generation,
+    string Outcome, DateTime OccurredAt, int SchemaVersion = 1)
+{
+    public bool IsValid() => SchemaVersion == 1 && EventId != Guid.Empty && CampaignId != Guid.Empty &&
+        DeliveryId != Guid.Empty && Generation > 0 && OccurredAt.Kind == DateTimeKind.Utc &&
+        Outcome is "Sent" or "Failed" or "RetryScheduled" or "Interrupted";
+}
 
 public static class CampaignRules
 {

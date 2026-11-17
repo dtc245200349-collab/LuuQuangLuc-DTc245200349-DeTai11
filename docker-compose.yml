@@ -54,6 +54,8 @@ services:
     environment:
       <<: *app-environment
       ASPNETCORE_HTTP_PORTS: "8080"
+      Admin__Username: ${ADMIN_USERNAME:-admin}
+      Admin__Password: ${ADMIN_PASSWORD:-notifylab_demo_admin}
     ports: ["127.0.0.1:${API_PORT:-5080}:8080"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -74,6 +76,16 @@ services:
       mailpit: { condition: service_started }
     deploy:
       replicas: 2
+    restart: unless-stopped
+  notification-audit:
+    build:
+      context: .
+      dockerfile: src/Notification.Audit/Dockerfile
+    environment:
+      <<: *app-environment
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     restart: unless-stopped
 
 volumes:

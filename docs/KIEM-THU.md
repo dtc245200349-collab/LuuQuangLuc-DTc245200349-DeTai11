@@ -1,5 +1,16 @@
 # Kết quả kiểm thử
 
+## Bản bổ sung đăng nhập và audit
+
+- Build Release thành công, 0 lỗi và 0 cảnh báo. Toàn bộ 11 kiểm tra quy tắc nghiệp vụ đạt.
+- Kiểm thử trên bộ Docker Mailpit riêng xác nhận API trả 401 khi chưa đăng nhập, từ chối mật khẩu sai, cho Admin truy cập và xóa phiên khi đăng xuất.
+- Subscriber ghi nhận 34 sự kiện của chiến dịch chính, gồm 31 gửi thành công, một lỗi vĩnh viễn và hai lần chờ thử lại. Phát lại cùng EventId không tạo thêm nhật ký.
+- Khi tạm dừng Audit, Worker vẫn gửi thử được. Sự kiện nằm trong queue và xuất hiện trong nhật ký sau khi Audit khởi động lại.
+- Các ca phục hồi Worker, RabbitMQ và PostgreSQL đều đạt. Mailpit nhận tổng cộng 45 email thử nghiệm.
+- Microsoft Edge đã chạy qua màn hình đăng nhập, mật khẩu sai, hộp thoại audit, đăng xuất và kiểm tra bố cục ở 390 px.
+
+## Kiểm thử phiên bản ban đầu
+
 Ngày thực hiện: **16/11/2026**, múi giờ Asia/Bangkok. Môi trường: Windows, .NET SDK 10.0.401, Docker Desktop Linux containers, hai Notification Worker. Kết quả bên dưới là kiểm thử cục bộ; chưa phải kết quả workflow GitHub hay benchmark hiệu năng.
 
 ## Build và cấu hình

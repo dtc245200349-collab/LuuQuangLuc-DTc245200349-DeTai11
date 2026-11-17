@@ -247,6 +247,7 @@ public sealed class NotificationStore(NpgsqlDataSource source, ILogger<Notificat
             WHERE delivery_id=@id AND generation=@generation
             """, ("id", delivery.Id), ("generation", delivery.Generation), ("status", status), ("error", error));
         await history.ExecuteNonQueryAsync(ct);
+        await AppendAuditAsync(connection, tx, delivery.CampaignId, delivery.Id, delivery.Generation, status, ct);
         await tx.CommitAsync(ct);
     }
 
@@ -277,6 +278,7 @@ public sealed class NotificationStore(NpgsqlDataSource source, ILogger<Notificat
                 WHERE delivery_id=@id AND generation=@generation AND finished_at IS NULL
                 """, ("id", id), ("generation", generation));
             await history.ExecuteNonQueryAsync(ct);
+            await AppendAuditAsync(connection, tx, campaign, id, generation, "Interrupted", ct);
         }
         await using var update = Command(connection, tx, """
             UPDATE deliveries SET status=@status,generation=generation+1,owner=NULL,lease_until=NULL,next_attempt_at=NULL,
@@ -295,4 +297,68 @@ public sealed class NotificationStore(NpgsqlDataSource source, ILogger<Notificat
         logger.LogInformation("Recovered DeliveryId={DeliveryId} From={PreviousStatus} Exhausted={Exhausted}", id, oldStatus, exhausted);
         return true;
     }
+
+    private static async Task AppendAuditAsync(NpgsqlConnection connection, NpgsqlTransaction tx, Guid campaign,
+        Guid delivery, int generation, string outcome, CancellationToken ct)
+    {
+        await using var command = Command(connection, tx, """
+            INSERT INTO audit_outbox(event_id,campaign_id,delivery_id,generation,outcome)
+            VALUES (@event,@campaign,@delivery,@generation,@outcome)
+            """, ("event", Guid.NewGuid()), ("campaign", campaign), ("delivery", delivery),
+            ("generation", generation), ("outcome", outcome));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<bool> PublishNextAuditAsync(Func<DeliveryAuditEvent, Task> publish, CancellationToken ct)
+    {
+        await using var connection = await source.OpenConnectionAsync(ct);
+        await using var tx = await connection.BeginTransactionAsync(ct);
+        await using var command = Command(connection, tx, """
+            SELECT event_id,campaign_id,delivery_id,generation,outcome,occurred_at
+            FROM audit_outbox WHERE published_at IS NULL
+            ORDER BY occurred_at,event_id LIMIT 1 FOR UPDATE SKIP LOCKED
+            """);
+        DeliveryAuditEvent item;
+        await using (var reader = await command.ExecuteReaderAsync(ct))
+        {
+            if (!await reader.ReadAsync(ct)) return false;
+            item = ReadAuditEvent(reader);
+        }
+        await publish(item);
+        await using var mark = Command(connection, tx,
+            "UPDATE audit_outbox SET published_at=now() WHERE event_id=@event", ("event", item.EventId));
+        await mark.ExecuteNonQueryAsync(ct);
+        await tx.CommitAsync(ct);
+        return true;
+    }
+
+    public async Task RecordAuditAsync(DeliveryAuditEvent item, CancellationToken ct)
+    {
+        await using var connection = await source.OpenConnectionAsync(ct);
+        await using var command = Command(connection, null, """
+            INSERT INTO audit_events(event_id,campaign_id,delivery_id,generation,outcome,occurred_at)
+            VALUES (@event,@campaign,@delivery,@generation,@outcome,@occurred)
+            ON CONFLICT (event_id) DO NOTHING
+            """, ("event", item.EventId), ("campaign", item.CampaignId), ("delivery", item.DeliveryId),
+            ("generation", item.Generation), ("outcome", item.Outcome), ("occurred", item.OccurredAt));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<List<DeliveryAuditEvent>> AuditAsync(Guid campaignId, int page, int pageSize, CancellationToken ct)
+    {
+        await using var connection = await source.OpenConnectionAsync(ct);
+        await using var command = Command(connection, null, """
+            SELECT event_id,campaign_id,delivery_id,generation,outcome,occurred_at
+            FROM audit_events WHERE campaign_id=@campaign
+            ORDER BY occurred_at DESC,event_id LIMIT @limit OFFSET @offset
+            """, ("campaign", campaignId), ("limit", pageSize), ("offset", (long)(page - 1) * pageSize));
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        var items = new List<DeliveryAuditEvent>();
+        while (await reader.ReadAsync(ct)) items.Add(ReadAuditEvent(reader));
+        return items;
+    }
+
+    private static DeliveryAuditEvent ReadAuditEvent(NpgsqlDataReader reader) => new(
+        reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2), reader.GetInt32(3),
+        reader.GetString(4), reader.GetDateTime(5));
 }

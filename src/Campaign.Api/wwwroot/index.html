@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chiến dịch · NotifyLab</title>
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
+  <link rel="stylesheet" href="/styles.css?v=admin-audit">
+  <script src="/app.js?v=admin-audit" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -13,7 +13,9 @@
     <nav aria-label="Điều hướng chính">
       <a class="nav-current" href="/" aria-current="page"><span aria-hidden="true">▤</span> Chiến dịch</a>
     </nav>
+    <button id="open-create" class="primary"><span aria-hidden="true">＋</span> Tạo chiến dịch</button>
     <a id="mailpit-link" class="inbox-link" href="http://localhost:8025" target="_blank" rel="noopener">Hộp thư Mailpit <span aria-hidden="true">↗</span></a>
+    <button id="logout" class="secondary session-action" type="button" hidden>Đăng xuất</button>
   </aside>
   <main>
     <div id="notice" role="status" aria-live="polite" hidden></div>
@@ -21,7 +23,6 @@
     <section id="campaigns">
       <header class="page-header">
         <div><h1>Chiến dịch</h1><p>Quản lý các đợt gửi email và kiểm tra kết quả.</p></div>
-        <button id="open-create" class="primary"><span aria-hidden="true">＋</span> Tạo chiến dịch</button>
       </header>
       <div class="panel">
         <div class="toolbar">
@@ -41,7 +42,7 @@
       <button id="back" class="text-button back">← Tất cả chiến dịch</button>
       <header class="page-header">
         <div><h1 id="detail-name" tabindex="-1"></h1><div id="detail-status"></div><p id="detail-subject"></p></div>
-        <div class="actions"><button id="start" class="primary">Bắt đầu gửi</button><button id="retry" class="secondary">Gửi lại thư lỗi</button></div>
+        <div class="actions"><button id="start" class="primary">Bắt đầu gửi</button><button id="retry" class="secondary">Gửi lại thư lỗi</button><button id="show-audit" class="secondary">Nhật ký audit</button></div>
       </header>
       <div class="panel overview">
         <dl class="stats">
@@ -88,6 +89,23 @@
   <dialog id="history" aria-labelledby="history-title">
     <header class="dialog-header"><div><h2 id="history-title">Lịch sử gửi</h2><p id="history-address" class="hint"></p></div><button id="close-history" class="icon-button" aria-label="Đóng">×</button></header>
     <div id="history-content" class="dialog-body"></div>
+  </dialog>
+  <dialog id="audit" class="audit-dialog" aria-labelledby="audit-title">
+    <header class="dialog-header">
+      <div><h2 id="audit-title">Nhật ký audit</h2><p id="audit-campaign" class="hint"></p></div>
+      <button id="close-audit" class="icon-button" aria-label="Đóng">×</button>
+    </header>
+    <div id="audit-table" class="table-wrap" tabindex="0" role="region" aria-label="Bảng sự kiện gửi" hidden>
+      <table><thead><tr><th scope="col">Thời điểm</th><th scope="col">Kết quả</th><th scope="col">Mã lượt gửi</th><th scope="col">Phiên</th></tr></thead>
+        <tbody id="audit-events"></tbody></table>
+    </div>
+    <p id="audit-status" class="dialog-body hint" aria-live="polite"></p>
+    <div class="pager">
+      <span id="audit-page">Trang 1</span>
+      <button id="audit-prev" class="secondary" disabled>Trước</button>
+      <button id="audit-next" class="secondary" disabled>Sau</button>
+      <button id="audit-refresh" class="secondary">Làm mới</button>
+    </div>
   </dialog>
 </body>
 </html>

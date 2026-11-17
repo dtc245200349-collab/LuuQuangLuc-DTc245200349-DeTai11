@@ -10,6 +10,10 @@ Bài tập lớn đề tài 11, học phần **Phát triển ứng dụng phân 
 
 Cần Docker Desktop đang chạy ở chế độ Linux containers, Docker Compose v2 và kết nối Internet cho lần tải image đầu tiên. Không cần cài .NET trên máy nếu chạy toàn bộ bằng Docker.
 
+**Windows:** Nhấp đúp `Chay-NotifyLab.cmd` trong thư mục dự án. Tệp khởi động Docker Desktop nếu cần, chạy hai Worker, chờ API kết nối PostgreSQL và mở hai trang NotifyLab, Mailpit trong trình duyệt. Tệp giữ chế độ gửi của các container hiện có. Khi tạo mới container, tệp dùng SMTP thật nếu `.env` có cấu hình SMTP đầy đủ, hoặc dùng Mailpit nếu chưa cấu hình.
+
+Bạn cũng có thể chạy từ terminal bằng lệnh sau.
+
 ```sh
 docker compose up -d --build --scale notification-worker=2
 ```
@@ -18,7 +22,7 @@ Lần đầu cần chờ tải image, build .NET và kiểm tra sức khỏe Pos
 
 | Thành phần | Địa chỉ | Đăng nhập demo |
 |---|---|---|
-| Giao diện và API | http://localhost:5080 | Chưa có xác thực |
+| Giao diện và API | http://localhost:5080 | `admin` / `notifylab_demo_admin` |
 | Hộp thư Mailpit | http://localhost:8025 | Không cần |
 | RabbitMQ Management | http://localhost:15672 | `notifylab` / `notifylab_local_demo` |
 | Readiness DB | http://localhost:5080/health/ready | HTTP 200 khi API truy vấn DB được |
@@ -27,14 +31,20 @@ Các cổng chỉ bind `127.0.0.1`. Mật khẩu mặc định là dữ liệu d
 
 ## Demo trong vài phút
 
-1. Mở giao diện, bấm **Tạo chiến dịch**. Nhập tên, tiêu đề, nội dung rồi bấm **Điền ví dụ** hoặc nhập `samples/recipients.txt`.
+1. Mở giao diện và đăng nhập. Bấm **Tạo chiến dịch**, nhập tên, tiêu đề, nội dung rồi bấm **Điền ví dụ** hoặc nhập `samples/recipients.txt`.
 2. Bấm **Tạo bản nháp**, kiểm tra danh sách rồi **Bắt đầu gửi**.
-3. Quan sát Pending/Sent/Failed và bấm **Xem** để thấy lịch sử xử lý, WorkerId, số lần thử.
+3. Quan sát Pending/Sent/Failed và bấm **Xem** để thấy lịch sử xử lý, WorkerId, số lần thử. Bấm **Nhật ký audit** để xem các sự kiện do service audit ghi nhận.
 4. Mở Mailpit để đọc email đã gửi.
 5. Với cấu hình mặc định, địa chỉ `retry+…` giả lập lỗi hai lần rồi thành công ở lần thứ ba; địa chỉ `fail+…` giả lập lỗi vĩnh viễn. Các địa chỉ khác đi qua SMTP bình thường.
 6. Bấm **Gửi lại thư lỗi** để đưa các bản ghi Failed vào lượt mới. `fail+…` vẫn thất bại nếu cờ demo còn bật. Muốn gửi thành công nhóm này, đặt `ENABLE_DEMO_FAILURES=false` trong `.env`, chạy lại lệnh Compose rồi thử lại.
 
 Demo lỗi là chức năng kiểm thử có chủ đích. Tắt bằng `ENABLE_DEMO_FAILURES=false` để bỏ mô phỏng lỗi. Compose mặc định vẫn gửi qua Mailpit.
+
+## Đăng nhập quản trị
+
+Trong cấu hình Mailpit mặc định, đăng nhập với tên `admin` và mật khẩu demo `notifylab_demo_admin`. Để đổi, đặt `ADMIN_USERNAME` và `ADMIN_PASSWORD` trong `.env` rồi chạy lại Compose. SMTP thật yêu cầu mật khẩu quản trị riêng, dài từ 12 đến 256 ký tự. Đây là tài khoản ứng dụng, khác với tài khoản SMTP.
+
+API yêu cầu phiên đăng nhập có vai trò Admin để quản lý chiến dịch, tra cứu người nhận và xem audit. Phiên đăng nhập có thời hạn bốn giờ. Các endpoint health vẫn cho phép kiểm tra kết nối mà không cần đăng nhập. Với API client, đăng nhập tại `POST /auth/login`, giữ cookie phiên và gửi header `X-NotifyLab-Request: 1` trong mọi yêu cầu POST.
 
 ## Gửi email thật bằng SMTP
 
@@ -48,6 +58,7 @@ SMTP_RELAY_PORT=587
 SMTP_RELAY_USERNAME=ten-cua-ban@gmail.com
 SMTP_RELAY_PASSWORD=MAT_KHAU_UNG_DUNG
 SMTP_RELAY_FROM=ten-cua-ban@gmail.com
+ADMIN_PASSWORD=MAT_KHAU_QUAN_TRI_RIENG
 ```
 
 Nếu dùng nhà cung cấp khác, nhập host, cổng STARTTLS, thông tin xác thực và địa chỉ người gửi được phép. Chế độ này dùng STARTTLS (thường là cổng 587).
@@ -94,7 +105,7 @@ flowchart LR
 | Request–response | Client tạo/khởi chạy/truy vấn chiến dịch bằng HTTP. `202 Accepted` vẫn là phản hồi HTTP. |
 | Queue-based | Mẫu chủ đạo: một work queue, nhiều competing consumers, mỗi lần giao job cho một Worker. |
 | One-way | Ngữ nghĩa lệnh giao việc: publisher không chờ kết quả gửi email; xác nhận broker/ACK vẫn được dùng. |
-| Publish–subscribe | Chưa triển khai; phù hợp bổ sung audit và thống kê qua các queue riêng. |
+| Publish–subscribe | API phát sự kiện kết quả qua topic exchange `notifications.events`. Service audit theo dõi queue riêng `notification.audit`. |
 | Streaming/push | Chưa triển khai; giao diện hiện polling REST mỗi 3 giây, không gọi là push. |
 
 Xem [phân tích và lựa chọn MEP](PHAN-TICH-VA-LUA-CHON-MEP.md), [báo cáo kỹ thuật](docs/BAO-CAO.md) và [kết quả kiểm thử](docs/KIEM-THU.md).
@@ -110,8 +121,9 @@ Xem [phân tích và lựa chọn MEP](PHAN-TICH-VA-LUA-CHON-MEP.md), [báo cáo
 - Worker chết sau khi claim: lease 60 giây hết hạn, scheduler trong API tạo phiên mới hoặc kết thúc Failed nếu đã hết lượt. SMTP timeout 15 giây.
 - Message sai định dạng/schema vào `notification.dead`. Lỗi nghiệp vụ gửi email nằm trong DB để retry qua API, không mặc định đưa vào DLQ.
 - Structured JSON logs có CampaignId/DeliveryId/WorkerId. PostgreSQL, RabbitMQ và Mailpit có volume riêng.
+- Audit có outbox riêng được ghi cùng kết quả gửi. Subscriber lưu sự kiện theo EventId và ACK sau khi PostgreSQL ghi thành công. Nhật ký chỉ chứa ID, phiên, thời điểm và kết quả, bắt đầu từ khi chạy bản có audit.
 
-**Giới hạn:** SMTP không hỗ trợ giao dịch chung với DB, vì vậy vẫn có cửa sổ “đã gửi thư nhưng chết trước khi lưu Sent”. Hệ thống không cam kết exactly-once. Đây là demo một node DB/broker, chưa có HA, đăng nhập, giới hạn tốc độ nhà cung cấp hoặc benchmark tải lớn. Khi API tắt, Worker vẫn xử lý job có sẵn; phát Outbox và lịch retry tiếp tục khi API trở lại. Readiness kiểm tra DB, không cam kết broker đang online, vì API được thiết kế nhận công việc lúc broker tạm dừng.
+**Giới hạn:** SMTP không hỗ trợ giao dịch chung với DB, vì vậy vẫn có cửa sổ “đã gửi thư nhưng chết trước khi lưu Sent”. Hệ thống không cam kết exactly-once. Đây là demo một node DB/broker với một tài khoản quản trị, chưa có HA, quản lý nhiều tài khoản, giới hạn tốc độ nhà cung cấp hoặc benchmark tải lớn. Khi API tắt, Worker vẫn xử lý job có sẵn; phát Outbox và lịch retry tiếp tục khi API trở lại. Readiness kiểm tra DB, không cam kết broker đang online, vì API được thiết kế nhận công việc lúc broker tạm dừng.
 
 ## API
 
@@ -124,6 +136,8 @@ Xem [phân tích và lựa chọn MEP](PHAN-TICH-VA-LUA-CHON-MEP.md), [báo cáo
 | GET | `/campaigns/{id}/deliveries?status=Failed&page=1&pageSize=20` | Chi tiết người nhận; status bỏ trống/Pending/Sent/Failed |
 | POST | `/campaigns/{id}/retry-failed` | 202 và số job được xếp lại |
 | GET | `/campaigns/{id}/deliveries/{deliveryId}/attempts` | Tối đa 100 lần thử mới nhất; danh sách rỗng nếu chưa có |
+| GET | `/campaigns/{id}/audit?page=1&pageSize=20` | Nhật ký sự kiện do subscriber lưu, có phân trang |
+| POST | `/auth/login`, `/auth/logout` | Tạo hoặc xóa phiên quản trị |
 | GET | `/health/live`, `/health/ready` | Liveness và readiness DB |
 
 pageSize tối đa 100. `Pending` trên thống kê/bộ lọc bao gồm Pending, Processing và RetryScheduled. `Sent` nghĩa là SMTP chấp nhận, không phải xác nhận người dùng đã đọc. Kiểm tra `Total = Pending + Sent + Failed`.
@@ -132,9 +146,12 @@ Tạo dữ liệu bằng PowerShell:
 
 ```powershell
 $body = Get-Content samples/campaign.json -Raw -Encoding utf8
-$campaign = Invoke-RestMethod http://localhost:5080/campaigns -Method Post -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
-Invoke-RestMethod "http://localhost:5080/campaigns/$($campaign.id)/start" -Method Post
-Invoke-RestMethod "http://localhost:5080/campaigns/$($campaign.id)"
+$headers = @{ 'X-NotifyLab-Request' = '1' }
+$login = @{ username = 'admin'; password = 'notifylab_demo_admin' } | ConvertTo-Json
+Invoke-RestMethod http://localhost:5080/auth/login -Method Post -Headers $headers -ContentType 'application/json' -Body $login -SessionVariable notifyLabSession
+$campaign = Invoke-RestMethod http://localhost:5080/campaigns -Method Post -Headers $headers -WebSession $notifyLabSession -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+Invoke-RestMethod "http://localhost:5080/campaigns/$($campaign.id)/start" -Method Post -Headers $headers -WebSession $notifyLabSession
+Invoke-RestMethod "http://localhost:5080/campaigns/$($campaign.id)" -WebSession $notifyLabSession
 ```
 
 ## Build và kiểm thử
@@ -168,7 +185,7 @@ Khởi động hạ tầng:
 docker compose up -d postgres rabbitmq mailpit
 ```
 
-Đặt các biến sau trong **mỗi** terminal PowerShell dùng chạy API/Worker (điều chỉnh nếu đổi cổng/mật khẩu):
+Đặt các biến sau trong **mỗi** terminal PowerShell dùng chạy API, Worker và Audit (điều chỉnh nếu đổi cổng/mật khẩu):
 
 ```powershell
 $env:ConnectionStrings__Database = 'Host=localhost;Port=5432;Database=notifylab;Username=notifylab;Password=notifylab_local_demo'
@@ -185,6 +202,8 @@ Terminal API: `dotnet run --project src/Campaign.Api --urls http://localhost:508
 
 Hai terminal Worker: `dotnet run --project src/Notification.Worker`.
 
+Terminal audit: `dotnet run --project src/Notification.Audit`.
+
 Không chạy API container và API local cùng cổng. Các biến SMTP tùy chọn: `Smtp__From`, `Smtp__EnableSsl`, `Smtp__Username`, `Smtp__Password`. Bản mặc định chỉ dùng Mailpit nội bộ; khi cấu hình nhà cung cấp thực cần xem xét chống gửi trùng, hạn mức và xác thực phù hợp.
 
 ## Cấu trúc repository
@@ -193,6 +212,7 @@ Không chạy API container và API local cùng cổng. Các biến SMTP tùy ch
 src/
   Campaign.Api/           Minimal API, publisher, retry scheduler, Web Client, Dockerfile
   Notification.Worker/    Consumer, SMTP sender, Dockerfile
+  Notification.Audit/     Subscriber audit, Dockerfile
   Notification.Shared/    DTO, validation, PostgreSQL repository, schema, RabbitMQ topology
 tests/Notification.Tests/ Self-test nghiệp vụ không cần DB
 scripts/integration.py   Integration + fault tests
@@ -202,7 +222,7 @@ docs/                    Báo cáo và kết quả kiểm thử
 docker-compose.yml       Toàn bộ ứng dụng và hạ tầng
 ```
 
-Schema v1 được tạo tự động bằng SQL nhúng dưới advisory lock; API/Worker khởi động đồng thời vẫn an toàn. Chưa có cơ chế migration nâng cấp schema v2; nếu sửa cấu trúc bảng cần bổ sung migration có phiên bản, không chỉ sửa `CREATE TABLE IF NOT EXISTS`.
+Schema v1 và hai bảng audit của v2 được tạo tự động bằng SQL nhúng dưới advisory lock. Bản v2 giữ dữ liệu chiến dịch hiện có. Nhật ký audit nhận sự kiện mới sau khi nâng cấp.
 
 ## Đưa lên GitHub
 

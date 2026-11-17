@@ -7,6 +7,7 @@ builder.Logging.ClearProviders();
 builder.Logging.AddJsonConsole();
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 2 * 1024 * 1024);
 builder.Services.AddProblemDetails();
+AdminAccess.Register(builder.Services, builder.Configuration);
 builder.Services.AddNotificationInfrastructure(builder.Configuration);
 builder.Services.AddHostedService<OutboxPublisher>();
 builder.Services.AddHostedService<RetryScheduler>();
@@ -25,14 +26,49 @@ app.Use(async (context, next) =>
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Referrer-Policy"] = "same-origin";
     context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'";
+    if (context.Request.Path.StartsWithSegments("/campaigns") || context.Request.Path.StartsWithSegments("/auth")
+        || context.Request.Path.StartsWithSegments("/api"))
+        context.Response.Headers.CacheControl = "no-store";
+    // Cross-origin forms cannot add this header. CORS is intentionally not enabled.
+    if (HttpMethods.IsPost(context.Request.Method) && context.Request.Headers["X-NotifyLab-Request"] != "1")
+    {
+        await Results.Problem(statusCode: 403, title: "Yêu cầu thiếu X-NotifyLab-Request.").ExecuteAsync(context);
+        return;
+    }
+    await next(context);
+});
+app.UseAuthentication();
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path;
+    if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
+    {
+        // A tab with an old dashboard script still gets the login page on its next navigation.
+        if ((path == "/" || path == "/index.html") && !context.User.IsInRole(AdminAccess.Role))
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Redirect("/login.html");
+            return;
+        }
+    }
     await next(context);
 });
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = file => file.Context.Response.Headers.CacheControl =
+        string.Equals(Path.GetExtension(file.File.Name), ".html", StringComparison.OrdinalIgnoreCase)
+            ? "no-store"
+            : "no-cache"
+});
+app.UseAuthorization();
+app.UseRateLimiter();
+AdminAccess.MapEndpoints(app);
 
-app.MapGet("/health/live", () => Results.Ok(new { status = "alive" }));
+app.MapGet("/health/live", () => Results.Ok(new { status = "alive" })).AllowAnonymous();
 app.MapGet("/health/ready", async (NotificationStore store, CancellationToken ct) =>
-    await store.IsHealthyAsync(ct) ? Results.Ok(new { status = "ready", dependency = "postgres" }) : Results.StatusCode(503));
+    await store.IsHealthyAsync(ct) ? Results.Ok(new { status = "ready", dependency = "postgres" }) : Results.StatusCode(503))
+    .AllowAnonymous();
 app.MapGet("/api/info", (IConfiguration config) => Results.Ok(new
 {
     maxRecipients = CampaignRules.MaxRecipients,
@@ -72,6 +108,12 @@ app.MapGet("/campaigns/{id:guid}/deliveries", async (Guid id, string? status, in
 });
 app.MapGet("/campaigns/{id:guid}/deliveries/{deliveryId:guid}/attempts", async (Guid id, Guid deliveryId,
     NotificationStore store, CancellationToken ct) => Results.Ok(await store.AttemptsAsync(id, deliveryId, ct)));
+app.MapGet("/campaigns/{id:guid}/audit", async (Guid id, int? page, int? pageSize, NotificationStore store, CancellationToken ct) =>
+{
+    if (!ValidPage(page, pageSize)) return Results.BadRequest(new { error = "page >= 1, pageSize từ 1 đến 100." });
+    if (await store.GetAsync(id, ct) is null) return Results.NotFound();
+    return Results.Ok(await store.AuditAsync(id, page ?? 1, pageSize ?? 20, ct));
+});
 
 await app.RunAsync();
 

@@ -16,6 +16,7 @@ public sealed class OutboxPublisher(NotificationStore store, Broker broker, ILog
                 var options = new CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true);
                 await using var channel = await connection.CreateChannelAsync(options, stoppingToken);
                 await Broker.DeclareAsync(channel, stoppingToken);
+                await Broker.DeclareAuditAsync(channel, stoppingToken);
                 while (connection.IsOpen && channel.IsOpen && !stoppingToken.IsCancellationRequested)
                 {
                     var published = await store.PublishNextAsync(async job =>
@@ -31,7 +32,18 @@ public sealed class OutboxPublisher(NotificationStore store, Broker broker, ILog
                         logger.LogInformation("Published CampaignId={CampaignId} DeliveryId={DeliveryId} Generation={Generation}",
                             job.CampaignId, job.DeliveryId, job.Generation);
                     }, stoppingToken);
-                    if (!published) await Task.Delay(500, stoppingToken);
+                    var audited = await store.PublishNextAuditAsync(async item =>
+                    {
+                        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                        await channel.BasicPublishAsync(Broker.AuditExchange, $"delivery.{item.Outcome.ToLowerInvariant()}",
+                            mandatory: true, basicProperties: new BasicProperties
+                            {
+                                Persistent = true, ContentType = "application/json", MessageId = item.EventId.ToString(),
+                                CorrelationId = item.CampaignId.ToString(), Type = "DeliveryAuditEvent"
+                            }, body: JsonSerializer.SerializeToUtf8Bytes(item), cancellationToken: timeout.Token);
+                    }, stoppingToken);
+                    if (!published && !audited) await Task.Delay(500, stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }

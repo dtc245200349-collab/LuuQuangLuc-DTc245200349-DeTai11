@@ -4,6 +4,7 @@ services:
     environment:
       Delivery__EnableDemoFailures: "false"
       Delivery__ExternalSmtp: "true"
+      Admin__Password: ${ADMIN_PASSWORD:?Set a private ADMIN_PASSWORD in .env for real SMTP}
   notification-worker:
     environment:
       Delivery__EnableDemoFailures: "false"

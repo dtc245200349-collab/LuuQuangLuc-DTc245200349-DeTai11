@@ -23,7 +23,7 @@ Actor chính là Admin. Các ca sử dụng gồm tạo chiến dịch, nhập/c
 | RabbitMQ và nhiều Worker | Work queue chung, hai container Worker mặc định |
 | Lưu kết quả và thống kê | PostgreSQL, tổng hợp từ Delivery tránh cộng trùng |
 | Chạy lại job thất bại | Retry tự động hữu hạn + API retry-failed |
-| Chạy độc lập, Docker | Dockerfile riêng cho API và Worker; Docker Compose |
+| Chạy độc lập, Docker | Dockerfile riêng cho API, Worker và Audit. Docker Compose chạy cả ba service |
 | Cấu hình tách khỏi code | Environment variables và .env.example |
 | Logging, phục hồi | JSON logs, Outbox, lease, retry, ACK/confirm |
 | GitHub, lịch sử commit | Có .gitignore và CI; người học push và tiếp tục commit thực tế |
@@ -32,13 +32,15 @@ Actor chính là Admin. Các ca sử dụng gồm tạo chiến dịch, nhập/c
 
 Kiến trúc chi tiết và sơ đồ sequence nằm trong [bản phân tích](../PHAN-TICH-VA-LUA-CHON-MEP.md). Client dùng Request–response. API giao lệnh One-way qua RabbitMQ; Queue-based là mẫu chủ đạo. ACK/confirm xác nhận giao nhận không đồng nghĩa với kết quả gửi email. Hai Worker cùng queue chia việc, không phải hai subscriber nhận bản sao cùng lệnh.
 
-Publish–subscribe và Streaming/push chưa được triển khai vì phạm vi chính không cần audit độc lập hay đẩy dữ liệu. Giao diện dùng polling 3 giây, được phân loại Request–response. Việc chọn MEP dựa trên nhu cầu, không ép sử dụng đủ năm mẫu trên slide.
+Publish–subscribe được dùng để phát sự kiện kết quả gửi tới service audit. Campaign API phát vào topic exchange `notifications.events`, còn `Notification.Audit` đọc queue riêng `notification.audit`. Giao diện cập nhật bằng polling 3 giây theo Request–response.
 
 ## 4. Thiết kế dữ liệu và thông điệp
 
 `campaigns` lưu tên, tiêu đề, nội dung và thời điểm bắt đầu. `deliveries` chứa snapshot email, trạng thái, số lượt thử, generation và lease. Bản đầu lưu người nhận trực tiếp trong deliveries, chưa có sổ địa chỉ Recipients riêng. Danh sách người nhận được chuẩn hóa và loại trùng trong một chiến dịch.
 
 `outbox` lưu lệnh đã commit nhưng chưa được broker xác nhận. `delivery_attempts` giữ lịch sử mỗi generation. `schema_versions` ghi schema v1. Khóa duy nhất `(campaign_id,address)` ngăn lặp người nhận; `(delivery_id,generation)` ngăn tạo lệnh/lịch sử trùng cho cùng phiên.
+
+Schema v2 bổ sung `audit_outbox` để lưu sự kiện cùng giao dịch cập nhật kết quả gửi và `audit_events` để lưu kết quả từ subscriber. EventId là khóa chính để sự kiện phát lại không làm trùng nhật ký. Nhật ký bắt đầu từ các lượt gửi sau khi nâng cấp.
 
 Delivery được tạo lúc tạo Draft; Outbox chỉ được tạo khi start. Đây là chi tiết hiện thực để có thể xem người nhận trước khi chạy. Message gồm MessageId, CampaignId, DeliveryId, Generation và SchemaVersion; nội dung email được đọc từ DB. CorrelationId trên AMQP bằng CampaignId.
 
@@ -106,11 +108,13 @@ Self-test kiểm tra validation, retry và quy tắc tổng hợp. Integration t
 
 Chưa đo throughput, p95 latency hoặc so sánh tốc độ một/hai Worker. Hai Worker chứng minh phân phối việc, không chứng minh tăng tốc tuyến tính.
 
-## 8. Giới hạn và hướng phát triển
+## 8. Kiểm soát truy cập và hướng phát triển
+
+API dùng phiên cookie có thời hạn bốn giờ với vai trò Admin. Chỉ Admin truy cập dữ liệu chiến dịch hoặc audit. Các thao tác POST yêu cầu header riêng, đăng nhập có giới hạn số lần thử và mật khẩu SMTP thật được cấu hình tách với mật khẩu Admin. Bản hiện tại hỗ trợ một tài khoản quản trị cục bộ.
 
 SMTP có cửa sổ gửi thành công nhưng DB chưa ghi nhận. Hệ thống hướng tới at-least-once và giảm trùng, không exactly-once. Một node broker/DB có thể phục hồi sau restart nhưng không đảm bảo HA. DLQ dùng classic queue không cấu hình replicated/quorum at-least-once dead-lettering; không tuyên bố DLQ là kho lưu tuyệt đối khi broker gặp sự cố.
 
-Các hướng phát triển: xác thực/phân quyền; rate limiting theo nhà cung cấp; provider hỗ trợ idempotency key; PostgreSQL migration/backup; quorum queues/HA; Outbox retention; audit/statistics subscriber; đẩy tiến độ qua SignalR/SSE. Cần hoàn thành và kiểm thử từng tính năng trước khi mô tả là đã có.
+Các hướng phát triển: quản lý nhiều tài khoản và vai trò, hạn mức gửi theo nhà cung cấp, idempotency key phía nhà cung cấp, backup PostgreSQL, quorum queues, dọn Outbox định kỳ và đẩy tiến độ qua SignalR/SSE.
 
 ## 9. Chuẩn bị bảo vệ
 

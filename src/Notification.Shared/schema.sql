@@ -47,3 +47,26 @@ CREATE TABLE IF NOT EXISTS delivery_attempts (
     UNIQUE(delivery_id, generation)
 );
 INSERT INTO schema_versions(version) VALUES (1) ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS audit_outbox (
+    event_id uuid PRIMARY KEY,
+    campaign_id uuid NOT NULL,
+    delivery_id uuid NOT NULL,
+    generation integer NOT NULL,
+    outcome text NOT NULL,
+    occurred_at timestamptz NOT NULL DEFAULT now(),
+    published_at timestamptz,
+    UNIQUE(delivery_id, generation)
+);
+CREATE INDEX IF NOT EXISTS ix_audit_outbox_unpublished ON audit_outbox(occurred_at) WHERE published_at IS NULL;
+CREATE TABLE IF NOT EXISTS audit_events (
+    event_id uuid PRIMARY KEY,
+    campaign_id uuid NOT NULL,
+    delivery_id uuid NOT NULL,
+    generation integer NOT NULL,
+    outcome text NOT NULL,
+    occurred_at timestamptz NOT NULL,
+    recorded_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_audit_campaign ON audit_events(campaign_id, occurred_at DESC, event_id);
+INSERT INTO schema_versions(version) VALUES (2) ON CONFLICT DO NOTHING;

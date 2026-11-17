@@ -2,6 +2,7 @@
 import argparse
 import base64
 import concurrent.futures
+import http.cookiejar
 import json
 import os
 from pathlib import Path
@@ -18,17 +19,22 @@ parser.add_argument("--faults", action="store_true", help="Temporarily stop/star
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 run_id = uuid.uuid4().hex[:8]
+cookies = http.cookiejar.CookieJar()
+session = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
 
 
-def request(path, data=None, base=None, auth=False):
+def request(path, data=None, base=None, auth=False, anonymous=False, mutation_header=True):
     headers = {"Content-Type": "application/json"}
+    if data is not None and mutation_header and not auth:
+        headers["X-NotifyLab-Request"] = "1"
     if auth:
         password = os.environ.get("RABBITMQ_PASSWORD", "notifylab_local_demo")
         token = base64.b64encode(f"notifylab:{password}".encode()).decode()
         headers["Authorization"] = "Basic " + token
     req = urllib.request.Request((base or args.url) + path, headers=headers,
                                  data=None if data is None else json.dumps(data).encode())
-    with urllib.request.urlopen(req, timeout=20) as response:
+    open_request = urllib.request.urlopen if auth or anonymous else session.open
+    with open_request(req, timeout=20) as response:
         raw = response.read()
         return json.loads(raw) if raw else None
 
@@ -37,6 +43,15 @@ def check(condition, message):
     if not condition:
         raise AssertionError(message)
     print("PASS:", message, flush=True)
+
+
+def expect_http(code, action, message):
+    try:
+        action()
+    except urllib.error.HTTPError as error:
+        check(error.code == code, f"{message} (expected {code}, got {error.code})")
+    else:
+        raise AssertionError(f"{message}: expected {code}")
 
 
 def wait_for(function, timeout=120):
@@ -76,8 +91,23 @@ def compose(*arguments):
 
 
 wait_for(lambda: request("/health/ready"))
+for entry in ("/", "/index.html"):
+    with urllib.request.urlopen(args.url + entry, timeout=20) as page:
+        check(page.geturl().endswith("/login.html") and page.headers.get("Cache-Control") == "no-store"
+              and b'id="login-form"' in page.read(), f"Guest navigation from {entry} reaches the login form")
+expect_http(401, lambda: request("/campaigns", anonymous=True), "Anonymous users cannot list campaigns")
+expect_http(401, lambda: request("/campaigns", {}, anonymous=True), "Anonymous users cannot create campaigns")
+admin_user = os.environ.get("ADMIN_USERNAME", "admin")
+admin_password = os.environ.get("ADMIN_PASSWORD", "notifylab_demo_admin")
+expect_http(401, lambda: request("/auth/login", {"username": admin_user, "password": "incorrect"}),
+            "Invalid password is rejected")
+request("/auth/login", {"username": admin_user, "password": admin_password})
+check(request("/auth/session")["username"] == admin_user, "Admin signs in with a session cookie")
+with session.open(args.url + "/", timeout=20) as page:
+    check(page.geturl().endswith("/") and b'id="campaign-list"' in page.read(), "Admin navigation loads the dashboard")
+expect_http(403, lambda: request("/campaigns", {}, mutation_header=False), "Unsafe request requires the same-origin header")
 info = request("/api/info")
-check(info["demoFailures"], "Demo failures enabled for deterministic tests")
+check(info["demoFailures"] and not info["externalSmtp"], "Demo checks use Mailpit with deterministic failures")
 try:
     request("/campaigns", {"name": "Invalid", "subject": "Bad", "body": "Body", "recipients": ["not-email"]})
     raise AssertionError("Invalid email accepted")
@@ -98,6 +128,20 @@ retry = next(item for item in deliveries if item["address"].startswith("retry+")
 failed = next(item for item in deliveries if item["address"].startswith("fail+"))
 check(retry["totalAttempts"] == 3, "Temporary failure retries exactly three times")
 check(failed["totalAttempts"] == 1, "Permanent failure does not auto-retry")
+audit_path = f"/campaigns/{campaign}/audit?pageSize=100"
+expect_http(401, lambda: request(audit_path, anonymous=True), "Audit data is restricted to logged-in admins")
+events = wait_for(lambda: (items if len(items := request(audit_path)) >= 34 else None))
+check(len(events) == 34 and sum(item["outcome"] == "Sent" for item in events) == 31 and
+      sum(item["outcome"] == "Failed" for item in events) == 1 and
+      sum(item["outcome"] == "RetryScheduled" for item in events) == 2,
+      "Independent subscriber records sent, failed and retried attempts")
+replayed = {key[0].upper() + key[1:]: value for key, value in events[0].items()}
+replay = request("/api/exchanges/%2F/notifications.events/publish",
+                 {"properties": {"delivery_mode": 2}, "routing_key": f"delivery.{events[0]['outcome'].lower()}",
+                  "payload": json.dumps(replayed), "payload_encoding": "string"}, base=args.rabbit_url, auth=True)
+check(replay["routed"], "Existing audit event was replayed to its subscriber")
+time.sleep(2)
+check(len(request(audit_path)) == 34, "Replayed audit event is recorded only once")
 workers = set()
 for item in deliveries:
     history = request(f"/campaigns/{campaign}/deliveries/{item['id']}/attempts")
@@ -129,6 +173,15 @@ check(True, "Malformed message isolated in dead-letter queue")
 
 if args.faults:
     try:
+        compose("stop", "notification-audit")
+        delayed_audit = create([f"audit.{run_id}@example.test"], "audit-offline")
+        request(f"/campaigns/{delayed_audit}/start", {})
+        check(wait_for(lambda: completed(delayed_audit))["sent"] == 1, "Email sending continues while Audit is stopped")
+        check(not request(f"/campaigns/{delayed_audit}/audit"), "Audit view stays empty while its subscriber is stopped")
+        wait_for(lambda: request("/api/queues/%2F/notification.audit", base=args.rabbit_url, auth=True).get("messages_ready", 0) >= 1)
+        compose("start", "notification-audit")
+        check(len(wait_for(lambda: request(f"/campaigns/{delayed_audit}/audit"))) == 1,
+              "Audit subscriber catches up from its durable queue")
         compose("stop", "notification-worker")
         queued = create([f"queued{i}.{run_id}@example.test" for i in range(10)], "worker-offline")
         request(f"/campaigns/{queued}/start", {})
@@ -150,6 +203,8 @@ if args.faults:
         wait_for(lambda: request("/health/ready"))
         check(summary(campaign)["sent"] == 31, "Campaign state survives PostgreSQL restart")
     finally:
-        compose("start", "postgres", "rabbitmq", "notification-worker")
+        compose("start", "postgres", "rabbitmq", "notification-worker", "notification-audit")
 
+request("/auth/logout", {})
+expect_http(401, lambda: request("/auth/session"), "Sign-out removes the session")
 print(f"ALL INTEGRATION CHECKS PASSED. Campaign: {campaign}", flush=True)

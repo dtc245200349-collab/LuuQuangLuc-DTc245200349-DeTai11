@@ -4,7 +4,7 @@
 
 Tài liệu dựa trên `HUONG-DAN-CHUNG.md.pdf`, `11-he-thong-gui-thong-bao-hang-loat.md.pdf` và ảnh slide “Bản đồ 5 MEP” do người học cung cấp. Hai PDF xác định yêu cầu bài tập; slide cung cấp cách phân loại MEP của học phần. Các lựa chọn PostgreSQL, thiết kế bảng, chính sách retry và sơ đồ dưới đây là đề xuất thiết kế, không phải yêu cầu nguyên văn của giảng viên.
 
-Đây là bản phân tích và thiết kế ban đầu. Mã nguồn nay đã được triển khai trong `src/`; cách chạy ở [README](README.md), thiết kế hiện thực ở [báo cáo kỹ thuật](docs/BAO-CAO.md) và kết quả chạy thật ở [kiểm thử](docs/KIEM-THU.md). Những mục ghi “đề xuất” hoặc “mở rộng” bên dưới không tự động có nghĩa đã được hiện thực. Bản triển khai lưu snapshot người nhận trực tiếp trong Delivery và tạo Delivery lúc tạo Draft; chỉ tạo Outbox khi start. Chưa triển khai Pub/Sub hoặc Streaming/push.
+Đây là bản phân tích và thiết kế ban đầu. Mã nguồn nằm trong `src/`, cách chạy ở [README](README.md), thiết kế hiện thực ở [báo cáo kỹ thuật](docs/BAO-CAO.md) và kết quả chạy thật ở [kiểm thử](docs/KIEM-THU.md). Bản hiện tại lưu snapshot người nhận trong Delivery, tạo Delivery lúc tạo Draft và tạo Outbox khi start. Phần mở rộng Publish–subscribe đã được triển khai cho service audit. Giao diện vẫn cập nhật bằng polling.
 
 ## 2. Yêu cầu cần đáp ứng
 

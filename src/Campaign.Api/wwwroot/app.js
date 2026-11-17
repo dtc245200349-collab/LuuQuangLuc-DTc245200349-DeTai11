@@ -12,7 +12,11 @@ const date = value => value ? new Date(value).toLocaleString("vi-VN") : "—";
 function node(tag, text, className) { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (className) el.className = className; return el; }
 function notice(message, error = false) { $("notice").textContent = message; $("notice").className = error ? "error" : ""; $("notice").hidden = false; }
 async function api(path, options = {}) {
-  const response = await fetch(path, { ...options, headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(15000) });
+  const response = await fetch(path, { ...options, headers: { "Content-Type": "application/json", "X-NotifyLab-Request": "1" }, signal: AbortSignal.timeout(15000) });
+  if (response.status === 401) {
+    location.replace("/login.html");
+    throw new Error("Vui lòng đăng nhập lại.");
+  }
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.errors ? Object.values(data.errors).flat().join(" ") : data.error || data.title || `Lỗi HTTP ${response.status}`);
@@ -174,6 +178,14 @@ $("next").onclick = () => { state.page++; loadDetails().catch(showError); };
 $("campaign-prev").onclick = () => { state.campaignPage = Math.max(1, state.campaignPage - 1); refresh(); };
 $("campaign-next").onclick = () => { state.campaignPage++; refresh(); };
 $("refresh").onclick = refresh;
+$("logout").onclick = async () => {
+  try {
+    await api("/auth/logout", { method: "POST" });
+    location.replace("/login.html");
+  } catch (error) {
+    showError(error);
+  }
+};
 $("close-history").onclick = () => $("history").close();
 $("open-create").onclick = () => {
   $("create-error").hidden = true;
@@ -191,17 +203,67 @@ $("back").onclick = async () => {
   await refresh();
   if (!state.selected) ($( `campaign-${id}`) || $("open-create")).focus();
 };
-api("/api/info").then(info => {
+let auditPage = 1;
+let auditRequest = 0;
+async function loadAudit(page) {
+  const id = state.selected;
+  const request = ++auditRequest;
+  $("audit-status").textContent = "Đang tải nhật ký…";
+  $("audit-prev").disabled = true;
+  $("audit-next").disabled = true;
+  try {
+    const events = await api(`/campaigns/${id}/audit?page=${page}&pageSize=20`);
+    if (request !== auditRequest || !$("audit").open) return;
+    const rows = events.map(item => {
+      const row = node("tr");
+      const outcome = node("td");
+      outcome.append(badge(item.outcome));
+      row.append(node("td", date(item.occurredAt), "date"), outcome,
+        node("td", item.deliveryId), node("td", String(item.generation)));
+      return row;
+    });
+    $("audit-events").replaceChildren(...rows);
+    $("audit-table").hidden = !rows.length;
+    $("audit-status").textContent = rows.length ? "" : "Chưa có sự kiện ở trang này.";
+    auditPage = page;
+    $("audit-page").textContent = `Trang ${page}`;
+    $("audit-prev").disabled = page <= 1;
+    $("audit-next").disabled = rows.length < 20;
+  } catch (error) {
+    if (request === auditRequest && $("audit").open) {
+      $("audit-table").hidden = true;
+      $("audit-status").textContent = error.message;
+    }
+  }
+}
+$("show-audit").onclick = () => {
+  $("audit-campaign").textContent = $("detail-name").textContent;
+  $("audit-table").hidden = true;
+  auditPage = 1;
+  $("audit-page").textContent = "Trang 1";
+  $("audit").showModal();
+  loadAudit(auditPage);
+};
+$("close-audit").onclick = () => $("audit").close();
+$("audit-prev").onclick = () => loadAudit(auditPage - 1);
+$("audit-next").onclick = () => loadAudit(auditPage + 1);
+$("audit-refresh").onclick = () => loadAudit(auditPage);
+
+async function start() {
+  const info = await api("/api/info");
+  $("logout").hidden = false;
   if (info.externalSmtp) {
     $("mailpit-link").hidden = true;
     $("smtp-mode").hidden = false;
     $("sample").hidden = true;
     $("recipients").placeholder = "Mỗi dòng một địa chỉ email";
   }
-  if (!info.demoFailures) return;
-  $("demo-note").textContent = "Ví dụ kiểm thử: retry+… thành công ở lần 3, fail+… luôn thất bại.";
-  $("demo-note").hidden = false;
-}).catch(showError);
+  if (info.demoFailures) {
+    $("demo-note").textContent = "Ví dụ kiểm thử: retry+… thành công ở lần 3, fail+… luôn thất bại.";
+    $("demo-note").hidden = false;
+  }
+  poll();
+}
 
 async function poll() {
   try {
@@ -213,4 +275,4 @@ async function poll() {
     setTimeout(poll, 3000);
   }
 }
-poll();
+start().catch(showError);

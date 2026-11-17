@@ -10,6 +10,8 @@ public sealed class Broker(IConfiguration config)
     public const string RoutingKey = "notification.send";
     public const string DeadExchange = "notifications.dead";
     public const string DeadQueue = "notification.dead";
+    public const string AuditExchange = "notifications.events";
+    public const string AuditQueue = "notification.audit";
 
     public async Task<IConnection> ConnectAsync(string name, CancellationToken ct)
     {
@@ -40,5 +42,12 @@ public sealed class Broker(IConfiguration config)
                 ["x-dead-letter-routing-key"] = "invalid"
             }, cancellationToken: ct);
         await channel.QueueBindAsync(Queue, Exchange, RoutingKey, cancellationToken: ct);
+    }
+
+    public static async Task DeclareAuditAsync(IChannel channel, CancellationToken ct)
+    {
+        await channel.ExchangeDeclareAsync(AuditExchange, ExchangeType.Topic, durable: true, cancellationToken: ct);
+        await channel.QueueDeclareAsync(AuditQueue, durable: true, exclusive: false, autoDelete: false, cancellationToken: ct);
+        await channel.QueueBindAsync(AuditQueue, AuditExchange, "delivery.*", cancellationToken: ct);
     }
 }
